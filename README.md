@@ -145,7 +145,7 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 ```
 
 - Without `--model`, every model your server lists is shared under exactly the id it reports. A
-  Hugging Face id such as `Qwen/Qwen3.8-Flash-Next` keeps its slash and its case. The node
+  Hugging Face id such as `nvidia/GLM-5.3-Flash-NVFP4` keeps its slash and its case. The node
   re-reads the list while it runs, so a model added to vLLM later appears without restarting
   BitLLM.
 - `--model local=public`: use this only when your server's local name is not the name the
@@ -193,12 +193,13 @@ A network name is just the `model` string clients send. Two machines that announ
 string are interchangeable for it: the gateway picks one, and if it stops answering it tries
 another. The name must identify the weights, not the machine.
 
-1. **A public model uses its exact Hugging Face repo id.** `Qwen/Qwen3.8-Flash-Next`, with the
+1. **A public model uses its exact Hugging Face repo id.** `nvidia/GLM-5.3-Flash-NVFP4`, with the
    slash and the case as published. Independent hosts that serve the same repo match without a
    central registry, and one can replace another when it goes down.
 2. **A fine-tune or quant uses the repo id of the actual weights**, if it has one; otherwise the
-   base model plus a suffix that says what changed. Append the suffix to the repo id, for example
-   `Qwen/Qwen3.8-Flash-Next-fp4-alesha`.
+   base model plus a suffix that says what changed. For example the Mac Studio GLM node shares
+   `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX`; a fine-tune with no repo of its own appends
+   the suffix to the base id, such as `nvidia/GLM-5.3-Flash-NVFP4-heretic`.
 3. **A private or brand-new model can use any stable name.** Nothing has to be registered first:
    the node announces it, `GET /v1/models` lists it, and the dashboard lets a user pick it. Use
    `--model` only when the name the server reports locally is not the name clients should send.
@@ -210,8 +211,7 @@ gate; any id is accepted.
 |---|---|
 | `deepseek-v4.1-flash-1017` | DeepSeek V4.1 Flash, 1017 release, official weights |
 | `deepseek-v4.1-flash-1017-heretic` | same, heretic (uncensored) fine-tune |
-| `qwen3.8-flash-next-fp4-alesha` | Qwen3.8 Flash-Next, NVIDIA FP4-Local quant, alesha uncensored fine-tune |
-| `qwen3.8-flash-next-nvfp4-lil` | Qwen3.8 Flash-Next, official weights, local-inference-lab NVFP4-MXFP8-CSF-QAD quant (served with NVIDIA Flare: fixed sampling, temperature 1.0 / top-p 0.95 / top-k 20) |
+| `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX` | GLM 5.3 Flash, NVIDIA FP4-Local quant, Piecrust abliterated (uncensored), MLX on Apple silicon |
 
 Same name must mean same weights. A Hub id is the simplest way to make that true across
 operators.
@@ -221,9 +221,9 @@ the case and slashes of its Hugging Face repo id.
 
 | part | what it says | when to leave it out | examples |
 |---|---|---|---|
-| model | the base model and release, as its maker names it | never | `Qwen/Qwen3.8-Flash-Next`, `deepseek-v4.1-flash-1017` |
+| model | the base model and release, as its maker names it | never | `nvidia/GLM-5.3-Flash-NVFP4`, `deepseek-v4.1-flash-1017` |
 | quant | the weight format, if not the maker's own release | official weights as released | `fp4`, `nvfp4`, `int4`, `q4_k_m` |
-| source | who changed the weights: fine-tune name, or the group that made the quant | official weights as released | `heretic`, `alesha`, `lil` |
+| source | who changed the weights: fine-tune name, or the group that made the quant | official weights as released | `heretic`, `Piecrust-Abliterated` |
 
 How a server runs the model (vLLM or SGLang, context length, fixed sampling) does not change the
 name; note it in the table instead. To add a reference name, open an issue with: the base model,
@@ -240,6 +240,8 @@ bitllm                                 # use only, share nothing
 curl localhost:7778/v1/models
 curl localhost:7778/v1/chat/completions \
   -d '{"model":"deepseek-v4.1-flash-1017","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+curl localhost:7778/v1/chat/completions \
+  -d '{"model":"junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 curl localhost:7778/status             # your peer id, connections, ledger
 curl localhost:7778/queue              # slots, running jobs and the wait list
 ```

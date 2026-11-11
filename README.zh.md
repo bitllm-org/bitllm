@@ -96,7 +96,7 @@ irm https://bitllm.org/install.ps1 | iex
 bitllm --upstream http://localhost:8000/v1 --concurrency 2
 ```
 
-- 不加 `--model` 时，你的服务列出什么模型，就按它报告的那个 id 原样分享。Hugging Face 的 id（比如 `Qwen/Qwen3.8-Flash-Next`）会保留斜杠和大小写。节点运行时会重新读取模型列表，所以之后在 vLLM 里新加的模型不用重启 BitLLM 就会出现。
+- 不加 `--model` 时，你的服务列出什么模型，就按它报告的那个 id 原样分享。Hugging Face 的 id（比如 `nvidia/GLM-5.3-Flash-NVFP4`）会保留斜杠和大小写。节点运行时会重新读取模型列表，所以之后在 vLLM 里新加的模型不用重启 BitLLM 就会出现。
 - `--model 本地=公开`：只有本地服务叫的名字和网络名字不一样时才需要。等号左边是你的服务叫的名字，右边是网络名字。
 - `--concurrency`：同时接几个请求。多出来的请求在这个节点的队列里等，先按访问等级、再按到达顺序；等得越久等级每 20 秒升一级，但不会超过最高等级，之后到达顺序决定，所以同级里等得最久的先走。队列满了立刻回答，不让人等一个不存在的名额。
 - `--max-tokens`（默认 32768）：一个请求最多要多少新 token。每个请求只保留一个选择（`n` 会被丢掉）。
@@ -126,8 +126,8 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 
 网络名字就是客户端请求里的 `model` 字符串。两台机器广播同一个字符串，对这个模型来说就可以互换：网关挑一台，它不答了再换另一台。所以名字要说明权重，而不是说明机器。
 
-1. **公开模型用 Hugging Face 的原 id。** `Qwen/Qwen3.8-Flash-Next`，斜杠和大小写都照发布的样子。独立的主机只要跑同一个仓库就能对上，不需要中心登记；一台下线，另一台可以接过去。
-2. **微调或量化用实际权重的仓库 id**，有的话；没有就在基础模型后面加后缀说明改了什么。后缀直接接在 id 后面，例如 `Qwen/Qwen3.8-Flash-Next-fp4-alesha`。
+1. **公开模型用 Hugging Face 的原 id。** `nvidia/GLM-5.3-Flash-NVFP4`，斜杠和大小写都照发布的样子。独立的主机只要跑同一个仓库就能对上，不需要中心登记；一台下线，另一台可以接过去。
+2. **微调或量化用实际权重的仓库 id**，有的话；没有就在基础模型后面加后缀说明改了什么。比如 Mac Studio 上的 GLM 节点分享的是 `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX`；没有自己仓库的微调，把后缀接在基础 id 后面，例如 `nvidia/GLM-5.3-Flash-NVFP4-heretic`。
 3. **私有或全新的模型可以随便取一个稳定的名字。** 不需要先登记：节点会自动广播，`GET /v1/models` 会列出来，dashboard 里可以直接选。只有本地服务报告的 id 不是客户端该用的名字时，才需要 `--model`。
 
 下面的表是 beta 到目前为止给参考模型用的短名字，不是门槛；任何 id 都能用。
@@ -136,8 +136,7 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 |---|---|
 | `deepseek-v4.1-flash-1017` | DeepSeek V4.1 Flash，1017 版，官方权重 |
 | `deepseek-v4.1-flash-1017-heretic` | 同上，heretic（去审查）微调 |
-| `qwen3.8-flash-next-fp4-alesha` | Qwen3.8 Flash-Next，NVIDIA FP4-Local 量化，alesha 去审查微调 |
-| `qwen3.8-flash-next-nvfp4-lil` | Qwen3.8 Flash-Next，官方权重，local-inference-lab 的 NVFP4-MXFP8-CSF-QAD 量化（用 NVIDIA Flare 跑：固定采样，temperature 1.0 / top-p 0.95 / top-k 20） |
+| `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX` | GLM 5.3 Flash，NVIDIA FP4-Local 量化，Piecrust abliterated（去审查），Apple 芯片上用 MLX 跑 |
 
 同一个名字必须对应同一套权重。用 Hub id 是最简单的做法。
 
@@ -145,9 +144,9 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 
 | 部分 | 表示什么 | 什么时候省略 | 例子 |
 |---|---|---|---|
-| 模型 | 基础模型和版本，用厂商的名字 | 不能省 | `Qwen/Qwen3.8-Flash-Next`、`deepseek-v4.1-flash-1017` |
+| 模型 | 基础模型和版本，用厂商的名字 | 不能省 | `nvidia/GLM-5.3-Flash-NVFP4`、`deepseek-v4.1-flash-1017` |
 | 量化 | 权重格式，不是厂商原版时 | 厂商发布的原版权重 | `fp4`、`nvfp4`、`int4`、`q4_k_m` |
-| 来源 | 谁改了权重：微调名，或者做量化的团队 | 厂商发布的原版权重 | `heretic`、`alesha`、`lil` |
+| 来源 | 谁改了权重：微调名，或者做量化的团队 | 厂商发布的原版权重 | `heretic`、`Piecrust-Abliterated` |
 
 服务怎么跑（vLLM 还是 SGLang、上下文长度、固定采样）不改变名字；写在表里备注。要加参考名字时开一个 issue，写清：基础模型、权重来源（链接）、量化格式和谁做的、客户端需要知道的事（固定采样、上下文长度、图片支持）。不需要提供服务器地址：节点会在网络里互相找到。
 
@@ -160,6 +159,8 @@ bitllm                                 # 只用，不分享
 curl localhost:7778/v1/models
 curl localhost:7778/v1/chat/completions \
   -d '{"model":"deepseek-v4.1-flash-1017","stream":true,"messages":[{"role":"user","content":"你好"}]}'
+curl localhost:7778/v1/chat/completions \
+  -d '{"model":"junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX","stream":true,"messages":[{"role":"user","content":"你好"}]}'
 curl localhost:7778/status             # 节点 ID、连接、账本
 curl localhost:7778/queue              # 名额、正在跑的活和等待队列
 ```
