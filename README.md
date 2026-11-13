@@ -179,6 +179,8 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 - `--peer-fallback`: when your own server is down, answer a model you share from peers. Those peers can read the prompts.
 - `--open-slots N`: with `--open`, the most slots uninvited nodes may hold at once. Default half of `--concurrency`, at least 1.
 - `--open-daily N`: with `--open`, the credits all uninvited nodes together may use per UTC day, then they wait for idle slots. Default 0, no limit.
+- `--deny PEER_ID`: refuse one node outright, before any slot or quota. Repeatable. It takes the node id, not the pseudonym in a receipt. See [docs/abuse.md](docs/abuse.md).
+- `--attribution-log`: record which node is behind each receipt you countersign, in `attribution.jsonl` in the data directory: node id, address, receipt pseudonym and token counts, never the prompt. Off by default.
 - `--audit-every N`: with `--audit`, real requests to a peer between its spot checks. Default 50.
 - `--audit-serve`: offer to score answers for other nodes' `--audit`, if your server returns prompt logprobs (vLLM).
 - `--gateway ADDR`: the gateway's address. Default `127.0.0.1:7778`.
@@ -550,6 +552,14 @@ already streaming through your relay is cut when it goes down, and the user's ag
 - **Peers you connect to directly see your IP address**, and the peer serving you sees your node id.
   If that matters where you live, use the network through a VPN or Tor-capable VPS.
 - If you share a model, the clients you serve can see your IP too.
+- **A host may keep a record of who it served.** With `--attribution-log` a server writes the node
+  id and address behind each job, and the token counts, to a local file. It does not write the
+  prompt or the answer. A host that investigates abuse may look at requests more closely, as any
+  inference provider can.
+- **Don't use the network to attack systems you have no permission to test**, or to harm people.
+  The models are open; the machines that run them belong to people who share them for free. A host
+  decides whom it serves and can refuse any node (`--deny`). What a host does when it finds abuse
+  is in [docs/abuse.md](docs/abuse.md).
 - **A node could serve a different model than it claims.** Start with `--audit` (off by default) to
   spot-check the peers that answer you: about one request in 50 to a peer is followed by a canary
   request, and another node (the auditor) scores the answer token by token; a peer that keeps
