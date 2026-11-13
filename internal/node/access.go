@@ -96,6 +96,7 @@ const (
 	msgBusy       = "busy"
 	msgQueueFull  = "busy: the queue for this server is full right now. Another server may still answer; retry in a moment"
 	msgNotAllowed = "not allowed: this server serves only the peers its owner listed with --allow"
+	msgDenied     = "not allowed: this server declines requests from this peer"
 	msgUninvited  = "busy: this server serves uninvited nodes only when it is idle. Ask a member for an invite (bitllm invite), then link this node to your account"
 	msgQuotaSpent = "daily free quota on this server used up (its owner set one). Another server may still answer; sharing a model removes the limit, or try again after 00:00 UTC"
 )
@@ -135,7 +136,7 @@ func (n *Node) openSlots() int32 {
 // refusals counts why this server said no, for GET /status and GET /queue.
 // It is a small diagnostic, not policy: nothing reads it to decide anything.
 type refusals struct {
-	busy, queue, quota, allow atomic.Int64
+	busy, queue, quota, allow, deny atomic.Int64
 }
 
 func (r *refusals) snapshot() map[string]int64 {
@@ -144,6 +145,7 @@ func (r *refusals) snapshot() map[string]int64 {
 		"queue": r.queue.Load(),
 		"quota": r.quota.Load(),
 		"allow": r.allow.Load(),
+		"deny":  r.deny.Load(),
 	}
 }
 
@@ -159,6 +161,10 @@ func notAllowedText(remote peer.ID) string {
 // amount is the worst case the job may cost in credits, reserved against the
 // daily quota until it ends.
 func (n *Node) admit(remote peer.ID, model string, now time.Time, wait time.Duration, amount int64) (status int, msg string, a admission) {
+	if n.cfg.Deny[remote] {
+		n.refused.deny.Add(1)
+		return 403, msgDenied, a
+	}
 	if len(n.cfg.Allow) > 0 && !n.cfg.Allow[remote] {
 		n.refused.allow.Add(1)
 		return 403, notAllowedText(remote), a
@@ -287,7 +293,7 @@ func (n *Node) done(t ticket, credits int64, now time.Time) {
 // notAllowed reports whether a peer refused us for good: its owner serves
 // only an allow list we are not on. Asking it again will not help.
 func notAllowed(status int, msg string) bool {
-	return status == 403 && strings.HasPrefix(msg, msgNotAllowed)
+	return status == 403 && (strings.HasPrefix(msg, msgNotAllowed) || strings.HasPrefix(msg, msgDenied))
 }
 
 // isBusy reports whether a refusal is temporary, worth waiting out.

@@ -185,6 +185,12 @@ That is enough to publish this host as a seed at
 `_dnsaddr.bootstrap.bitllm.org`, if it should be one. A public relay that is
 not a seed needs no DNS entry.
 
+## If someone abuses your node
+
+You share your GPU with strangers, so sooner or later one of them may use it for something you do
+not want to power. [abuse.md](abuse.md) says how to see who is using your node, how to refuse one
+node without closing the server to everyone else, and what to keep and whom to tell.
+
 ## Troubleshooting
 
 - **`--public: advertising this node as a public relay` but nobody connects.**

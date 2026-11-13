@@ -89,6 +89,8 @@ type Config struct {
 	Roots            []string               // accounts at the top of the invite tree; none = membership off
 	Open             bool                   // serve uninvited nodes like members (any free slot, quota per node)
 	Allow            map[peer.ID]bool       // if set, serve only these peers (like members), and refuse every other peer
+	Deny             map[peer.ID]bool       // peers refused outright, before any quota or slot is considered
+	AttributionLog   bool                   // append the node id and address behind each receipt pseudonym to attribution.jsonl
 	OpenSlots        int                    // most slots uninvited nodes may hold on an open server; 0 = half
 	OpenDaily        int64                  // credits all uninvited nodes together may use per UTC day on an open server; 0 = no limit
 	MaxTokens        int                    // cap on new tokens per request we serve; 0 = none
@@ -182,11 +184,12 @@ type Node struct {
 
 	// qmu guards the serving slots and the queue: inflight, openInflight,
 	// peerSlots and waiters are changed under it (queue.go).
-	qmu       sync.Mutex
-	peerSlots map[peer.ID]int32
-	waiters   []*waiter
-	svc       atomic.Int64 // average job duration in ns, for the queue's ETA
-	refused   refusals     // why this server refused requests, for /status
+	qmu           sync.Mutex
+	peerSlots     map[peer.ID]int32
+	waiters       []*waiter
+	svc           atomic.Int64 // average job duration in ns, for the queue's ETA
+	refused       refusals     // why this server refused requests, for /status
+	attributionMu sync.Mutex   // serializes appends to and rotation of attribution.jsonl
 
 	started time.Time // when this node came up, shown by GET /status
 

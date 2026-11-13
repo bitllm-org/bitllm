@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/bitllm-org/bitllm/internal/account"
@@ -38,10 +40,63 @@ func (n *Node) handleReceipt(s network.Stream) {
 		fmt.Fprintf(s, "%s\n", err)
 		return
 	}
+	n.recordPeerBinding(sr, s.Conn().RemotePeer(), s.Conn().RemoteMultiaddr().String())
 	n.receipts.Add(sr)
 	b, _ := json.Marshal(sr)
 	n.receiptTop.Publish(context.Background(), b)
 	s.Write([]byte("ok\n"))
+}
+
+// attributionLogMax is the size at which attribution.jsonl is rotated. One
+// older file is kept, so the two together stay under twice this.
+const attributionLogMax = 64 << 20
+
+// recordPeerBinding appends the link between a receipt's client pseudonym and
+// the node id that actually delivered it, when the operator asked for it with
+// --attribution-log. The ledger keeps only the pseudonym (rotated every 30
+// days, one per server), so without this line a server that finds abuse in
+// its receipts cannot tell which node to refuse with --deny. One JSON line
+// per countersigned receipt, mode 0600, in the data directory. It records who
+// asked and how much, never the prompt or the answer.
+func (n *Node) recordPeerBinding(sr receipts.SignedReceipt, from peer.ID, addr string) {
+	if !n.cfg.AttributionLog || n.cfg.DataDir == "" {
+		return
+	}
+	rec := struct {
+		TS         string `json:"ts"`
+		Job        string `json:"job"`
+		Model      string `json:"model"`
+		Node       string `json:"node"`
+		Addr       string `json:"addr"`
+		Client     string `json:"client"`
+		Prompt     int64  `json:"prompt_tokens"`
+		Completion int64  `json:"completion_tokens"`
+		ReceiptTS  int64  `json:"receipt_ts"`
+	}{
+		TS: time.Now().UTC().Format(time.RFC3339), Job: sr.Receipt.Job, Model: sr.Receipt.Model,
+		Node: from.String(), Addr: addr, Client: sr.Receipt.Client,
+		Prompt: sr.Receipt.Prompt, Completion: sr.Receipt.Completion, ReceiptTS: sr.Receipt.TS,
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	b = append(b, '\n')
+	path := filepath.Join(n.cfg.DataDir, "attribution.jsonl")
+	n.attributionMu.Lock()
+	defer n.attributionMu.Unlock()
+	if info, err := os.Stat(path); err == nil && info.Size() >= attributionLogMax {
+		os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		log.Printf("attribution log: %v", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(b); err != nil {
+		log.Printf("attribution log: %v", err)
+	}
 }
 
 // sendReceipt signs a receipt for a job p served us and gives it to p. It
