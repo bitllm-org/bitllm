@@ -1140,6 +1140,7 @@ func TestErrorShapes(t *testing.T) {
 		{"busy", chatBody, refuseWith(429, msgBusy), 429, "rate_limit_error"},
 		{"refused", chatBody, refuseWith(404, "no such model"), 404, "not_found_error"},
 		{"not allowed", chatBody, refuseWith(403, msgNotAllowed), 403, "permission_error"},
+		{"denied", chatBody, refuseWith(403, msgDenied), 403, "permission_error"},
 		{"failed", chatBody, refuseWith(1000, "odd"), 502, "api_error"},
 	}
 	for _, tc := range cases {

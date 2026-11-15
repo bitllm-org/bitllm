@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -317,7 +318,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Var(&allow, "allow", "peer id to serve (repeatable). With any --allow, this server serves only the listed peers, on any free slot like members, and refuses every other peer with a clear error")
 	flag.Var(&deny, "deny", "peer id to refuse (repeatable), checked before any slot or quota. Use the node id, not the pseudonym in a receipt: --attribution-log records which node is behind a pseudonym")
-	flag.BoolVar(&cfg.AttributionLog, "attribution-log", false, "record which node is behind each receipt you countersign: one line per job in attribution.jsonl in the data directory, with the node id, its address, the receipt pseudonym and the token counts, never the prompt. Off by default; turn it on to find the node id to --deny")
+	flag.BoolVar(&cfg.AttributionLog, "attribution-log", false, "record which node is behind each receipt you countersign: one line per countersigned receipt in attribution.jsonl in the data directory, with the node id, its address, the receipt pseudonym and the token counts, never the prompt. Off by default; turn it on to find the node id to --deny")
 	flag.BoolVar(&cfg.Open, "open", false, "serve uninvited nodes like members (any free slot, --free-daily per node), not only when idle")
 	flag.IntVar(&cfg.OpenSlots, "open-slots", 0, "with --open: most slots uninvited nodes may hold at once (default: half of --concurrency, at least 1)")
 	flag.Int64Var(&cfg.OpenDaily, "open-daily", 0, "with --open: credits all uninvited nodes together may use per UTC day, after which they are served only when idle (default 0: no limit)")
@@ -381,7 +382,14 @@ func main() {
 			}
 			cfg.Deny[id] = true
 		}
-		log.Printf("refusing %d denied peer(s)", len(cfg.Deny))
+		ids := make([]string, 0, len(cfg.Deny))
+		for id := range cfg.Deny {
+			ids = append(ids, id.String())
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			log.Printf("denying peer %s", id)
+		}
 	}
 	if wsPort > 0 {
 		// Peers arriving through the tunnel all come from 127.0.0.1.
