@@ -39,7 +39,7 @@ func TestMemberSet(t *testing.T) {
 	ever := map[string]bool{}
 	served := func() map[string]bool { return ever }
 	path := t.TempDir() + "/m.json"
-	m := members.Open(path, []string{root.addr}, served)
+	m := openMembers(t, path, []string{root.addr}, served)
 	add := func(it members.Item) {
 		t.Helper()
 		if err := m.Check(it); err != nil || !m.Add(it) {
@@ -127,7 +127,7 @@ func TestMemberSet(t *testing.T) {
 	if err := m.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	again := members.Open(path, []string{root.addr}, served).Compute()
+	again := openMembers(t, path, []string{root.addr}, served).Compute()
 	if len(again.Member) != len(before.Member) || again.Member[a.addr] || !again.Member[d.addr] {
 		t.Fatalf("reload: %d vs %d members", len(again.Member), len(before.Member))
 	}
@@ -137,7 +137,7 @@ func TestMemberSet(t *testing.T) {
 // they cannot fill the store and keep real invites out.
 func TestInviteSpamCannotBlock(t *testing.T) {
 	root := newEthKey(t)
-	m := members.Open(t.TempDir()+"/m.json", []string{root.addr}, nil)
+	m := openMembers(t, t.TempDir()+"/m.json", []string{root.addr}, nil)
 	for i := range 1000 {
 		m.Add(newEthKey(t).invite(newEthKey(t).addr, int64(i)))
 	}

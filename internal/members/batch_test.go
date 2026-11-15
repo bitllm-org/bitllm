@@ -63,10 +63,24 @@ func itemIDs(items []members.Item) []string {
 	return out
 }
 
+// openMembers opens a store and closes it before the test's temporary
+// directory is removed. A pending debounced write would otherwise race the
+// cleanup and log a save into a directory that is already gone.
+func openMembers(t *testing.T, path string, roots []string, served func() map[string]bool) *members.Members {
+	t.Helper()
+	m := members.Open(path, roots, served)
+	t.Cleanup(func() {
+		if err := m.Close(); err != nil {
+			t.Errorf("closing members store: %v", err)
+		}
+	})
+	return m
+}
+
 func TestAddBatchUsesOneCompute(t *testing.T) {
 	root := newEthKey(t)
 	items := tree(t, root, 2000, members.MemberInvites)
-	m := members.Open(t.TempDir()+"/m.json", []string{root.addr}, nil)
+	m := openMembers(t, t.TempDir()+"/m.json", []string{root.addr}, nil)
 	stored := m.AddBatch(items)
 	for i, ok := range stored {
 		if !ok {
@@ -93,7 +107,7 @@ func TestAddBatchUsesOneCompute(t *testing.T) {
 
 func TestAddKnownItemCostsNoCompute(t *testing.T) {
 	root, guest := newEthKey(t), newEthKey(t)
-	m := members.Open(t.TempDir()+"/m.json", []string{root.addr}, nil)
+	m := openMembers(t, t.TempDir()+"/m.json", []string{root.addr}, nil)
 	it := root.invite(guest.addr, 1)
 	if !m.Add(it) {
 		t.Fatal("refused")
@@ -136,8 +150,8 @@ func TestAddBatchMatchesOneAtATime(t *testing.T) {
 		served := func() map[string]bool { return ever }
 
 		// Gossip delivered some of them first, in arrival order.
-		slow := members.Open(t.TempDir()+"/slow.json", []string{root.addr}, served)
-		fast := members.Open(t.TempDir()+"/fast.json", []string{root.addr}, served)
+		slow := openMembers(t, t.TempDir()+"/slow.json", []string{root.addr}, served)
+		fast := openMembers(t, t.TempDir()+"/fast.json", []string{root.addr}, served)
 		prior := items[:len(items)/4]
 		rest := items[len(items)/4:]
 		for _, it := range prior {
@@ -175,7 +189,7 @@ func TestAddBatchMatchesOneAtATime(t *testing.T) {
 
 func TestAddBatchReportsByPosition(t *testing.T) {
 	root, guest, stranger := newEthKey(t), newEthKey(t), newEthKey(t)
-	m := members.Open(t.TempDir()+"/m.json", []string{root.addr}, nil)
+	m := openMembers(t, t.TempDir()+"/m.json", []string{root.addr}, nil)
 	bad := root.invite(newEthKey(t).addr, 3)
 	bad.Invite.Sig = "00"
 	got := m.AddBatch([]members.Item{
@@ -195,7 +209,7 @@ func TestAddBatchReportsByPosition(t *testing.T) {
 
 func TestAddBatchWithMembershipOff(t *testing.T) {
 	a, b := newEthKey(t), newEthKey(t)
-	m := members.Open(t.TempDir()+"/m.json", nil, nil)
+	m := openMembers(t, t.TempDir()+"/m.json", nil, nil)
 	got := m.AddBatch([]members.Item{a.invite(b.addr, 1), a.revoke(b.addr, 2)})
 	if !got[0] || got[1] {
 		t.Fatalf("got %v, want the invite stored and the revocation refused", got)
@@ -209,7 +223,7 @@ func TestOpenReplaysWithoutWriting(t *testing.T) {
 	root := newEthKey(t)
 	path := t.TempDir() + "/m.json"
 	items := tree(t, root, 200, members.MemberInvites)
-	first := members.Open(path, []string{root.addr}, nil)
+	first := openMembers(t, path, []string{root.addr}, nil)
 	first.AddBatch(items)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
@@ -222,7 +236,7 @@ func TestOpenReplaysWithoutWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := members.Open(path, []string{root.addr}, nil)
+	m := openMembers(t, path, []string{root.addr}, nil)
 	if got := m.Computes(); got > 1 {
 		t.Fatalf("%d computes on open, want 1", got)
 	}
@@ -248,14 +262,14 @@ func TestOpenWritesOnceToDropJunk(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := members.Open(path, []string{root.addr}, nil)
+	m := openMembers(t, path, []string{root.addr}, nil)
 	if err := m.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if m.Writes() != 1 || len(m.Items()) != len(good) {
 		t.Fatalf("%d writes, %d items", m.Writes(), len(m.Items()))
 	}
-	if got := members.Open(path, []string{root.addr}, nil); len(got.Items()) != len(good) {
+	if got := openMembers(t, path, []string{root.addr}, nil); len(got.Items()) != len(good) {
 		t.Fatalf("file kept %d items", len(got.Items()))
 	}
 }
@@ -268,7 +282,7 @@ func TestBadFilesDoNotStopTheNode(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		m := members.Open(path, []string{root.addr}, nil)
+		m := openMembers(t, path, []string{root.addr}, nil)
 		if len(m.Items()) != 0 {
 			t.Fatalf("%q: %d items", content, len(m.Items()))
 		}
@@ -283,7 +297,7 @@ func TestBadFilesDoNotStopTheNode(t *testing.T) {
 func TestRevokePrunesAtOnce(t *testing.T) {
 	root, a, b, kept := newEthKey(t), newEthKey(t), newEthKey(t), newEthKey(t)
 	path := t.TempDir() + "/m.json"
-	m := members.Open(path, []string{root.addr}, nil)
+	m := openMembers(t, path, []string{root.addr}, nil)
 	for _, it := range []members.Item{root.invite(a.addr, 1), root.invite(kept.addr, 2), a.invite(b.addr, 3), b.invite(newEthKey(t).addr, 4)} {
 		if !m.Add(it) {
 			t.Fatal("refused")
@@ -315,7 +329,7 @@ func TestRevokePrunesAtOnce(t *testing.T) {
 
 func TestBatchedRevokeFreesRoomForItsInvites(t *testing.T) {
 	root, a, b, c := newEthKey(t), newEthKey(t), newEthKey(t), newEthKey(t)
-	m := members.Open(t.TempDir()+"/m.json", []string{root.addr}, nil)
+	m := openMembers(t, t.TempDir()+"/m.json", []string{root.addr}, nil)
 	m.AddBatch([]members.Item{root.invite(a.addr, 1), a.invite(b.addr, 2)})
 	got := m.AddBatch([]members.Item{root.revoke(a.addr, 3), root.invite(c.addr, 4)})
 	if !got[0] || !got[1] {
@@ -356,7 +370,7 @@ func TestMembershipAtScale(t *testing.T) {
 	}
 
 	start := time.Now()
-	m := members.Open(path, roots, nil)
+	m := openMembers(t, path, roots, nil)
 	opened := time.Since(start)
 	t.Logf("startup with %d invites: %v, %d computes, %d writes", len(items), opened, m.Computes(), m.Writes())
 	if len(m.Items()) != len(items) || opened > bound {
@@ -367,7 +381,7 @@ func TestMembershipAtScale(t *testing.T) {
 	}
 
 	// A fresh node hears it all in one sync.
-	fresh := members.Open(t.TempDir()+"/fresh.json", roots, nil)
+	fresh := openMembers(t, t.TempDir()+"/fresh.json", roots, nil)
 	start = time.Now()
 	fresh.AddBatch(items)
 	first := time.Since(start)
@@ -387,7 +401,7 @@ func TestMembershipAtScale(t *testing.T) {
 	}
 
 	// Gossip got one invite in first: every synced invite now falls before it.
-	gossiped := members.Open(t.TempDir()+"/gossip.json", roots, nil)
+	gossiped := openMembers(t, t.TempDir()+"/gossip.json", roots, nil)
 	late := newEthKey(t)
 	if !gossiped.Add(root.invite(late.addr, time.Now().Unix())) {
 		t.Fatal("refused")
@@ -431,7 +445,7 @@ func TestLimitFollowsServedSet(t *testing.T) {
 	root, a := newEthKey(t), newEthKey(t)
 	var calls atomic.Int64
 	ever := map[string]bool{}
-	m := members.Open(t.TempDir()+"/m.json", []string{root.addr}, func() map[string]bool {
+	m := openMembers(t, t.TempDir()+"/m.json", []string{root.addr}, func() map[string]bool {
 		calls.Add(1)
 		return ever
 	})
