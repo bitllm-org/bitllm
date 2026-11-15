@@ -9,15 +9,27 @@ took more than half of that server's output for three days before anyone looked)
 
 ## What you can and cannot see
 
-- `receipts.jsonl` in the data directory lists every job you served: time, model, token counts and
-  a client id. **That client id is a pseudonym**, one per client per server, rotated every 30 days.
-  It tells you how much one client used. It does not tell you which node it is.
-- `--attribution-log` writes the missing link: for each job, the node id and address of the node
-  that sent it, next to the pseudonym. It is off by default. Turn it on before you need it; it
-  cannot be filled in afterwards.
+- `receipts.jsonl` in the data directory is your node's copy of the public receipt ledger, not a
+  log of your own jobs. It holds receipts you countersigned for jobs you served, receipts gossiped
+  by other servers, and receipts synced from a seed. Receipts are kept for 90 days; older ones are
+  folded into per-server totals. Each receipt line has the server id, time, model, token counts
+  and a client id; a folded line holds only that server's credits and job count. To see the jobs
+  you served, keep lines whose `server` is your node id (`GET /status` shows it as `id`).
+  **The client id is a pseudonym**, one per client per server, rotated every 30
+  days. It tells you how much one client used. It does not tell you which node it is. A job appears
+  only if the client sent its receipt back, so a custom client can leave no line.
+- `--attribution-log` writes the missing link: one line for each receipt you countersign, with the
+  node id and address of the node that sent it, next to the receipt's pseudonym, the job, the model
+  and the token counts. It is off by default, and it writes only when a receipt is countersigned,
+  so a job whose client did not send a receipt back has no line either. Turn it on before you need
+  it; it cannot be filled in afterwards. The address is the connection the receipt arrived on, which
+  may be a relay, so it is not necessarily the peer's own IP. The file is `attribution.jsonl` in
+  the data directory, mode 0600, rotated at 64 MB with one older file (`attribution.jsonl.1`) kept.
 - Your server sees every prompt in plaintext, like any inference provider. The node does not store
   prompts. Look at them only when the numbers give you a reason to, and only at the node in
-  question.
+  question. To see one, enable request logging in your model server (vLLM can log each request; see
+  its `--help`), or put a small local proxy between the node and the upstream that logs request
+  bodies.
 
 ## 1. Notice
 
@@ -33,8 +45,10 @@ of the ordinary requests on a busy server are that large. Do not block on prompt
 ## 2. Look, narrowly
 
 If one client stands out, look at one or two of its requests on the way to your model server. The
-tool list is usually enough: a coding agent carries `read`, `edit`, `bash`, `grep`; an attack
-framework carries tools named after what it does. A generic agent with a shell can do anything, so
+node stores no prompts, so this means logging you turned on in the model server or a local proxy
+(see above). The tool list is usually enough: a coding agent carries `read`, `edit`, `bash`,
+`grep`; an attack framework carries tools named after what it does. A generic agent with a shell
+can do anything, so
 a clean tool list is not proof of innocence, but a tool list full of scanners, credential
 spraying and exploit helpers aimed at named production hosts is a clear answer.
 
@@ -48,9 +62,18 @@ decide whether you want to power it.
 bitllm ... --deny 12D3KooW...   # repeatable; the node id from attribution.jsonl
 ```
 
-A denied node gets a permanent refusal before any slot or quota is touched, and `GET /status`
-counts the refusals under `refusals.deny`. Everyone else is served as before. Prefer this to
-dropping `--open`: closing the server punishes every other user for what one did.
+On a systemd host installed with `deploy/gpu-host.sh`, do not edit the unit: put the flag on
+`BITLLM_EXTRA_OPTS` in `/etc/bitllm/host.override.env`, then
+`systemctl restart bitllm-host` (see [docs/host-a-gpu.md](host-a-gpu.md)).
+
+A denied node is refused before it takes a serving slot or touches a day's quota, and before its
+request body is read. `GET /status` counts the refusals under `refusals.deny`. Everyone else is
+served as before. Prefer this to dropping `--open`: closing the server punishes every other user
+for what one did.
+
+A v0.5.1 or newer client treats the refusal as permanent and stops retrying that server. An older
+client sees a 403 it does not recognize, treats the server as a failed peer, and may try it again
+on the next request.
 
 Know the limit: node ids are free. Someone determined can make a new one in a minute, and a new id
 also starts with a fresh daily quota. `--deny` stops the node that is not paying attention and
@@ -62,16 +85,17 @@ nodes less, or serve them a different model than members.
 ## 4. Keep what you saw
 
 If the traffic targeted someone, they may need to know what was done. Before you restart anything,
-copy `receipts.jsonl` and `attribution.jsonl`, and if you looked at requests, keep those too. Note
-the times in UTC and hash the files. Captured prompts can contain other people's secrets
-(passwords, keys, card numbers the attacker collected), so keep the copy readable only by you, do
-not publish it, and do not send it unencrypted.
+copy `receipts.jsonl`, `attribution.jsonl` and, if it exists, the older `attribution.jsonl.1`, and
+if you looked at requests, keep those too. Note the times in UTC and hash the files. Captured
+prompts can contain other people's secrets (passwords, keys, card numbers the attacker collected),
+so keep the copy readable only by you, do not publish it, and do not send it unencrypted.
 
 ## 5. Tell the target
 
 If a named organization was on the receiving end, write to its security contact (look for
 `/.well-known/security.txt` on its site). Say what you are, what you saw and when, which addresses
-the requests came from, and what you did. Say plainly that you cannot tell whether the work was
+the connections came from (the address in `attribution.jsonl` may be a relay, so the peer's own IP
+may be hidden behind it), and what you did. Say plainly that you cannot tell whether the work was
 authorized. Leave secrets out of the first message and offer the material encrypted, on request.
 You were a carrier, not the attacker, and reporting it yourself is better for everyone than being
 found in their logs.

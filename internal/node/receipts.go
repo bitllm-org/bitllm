@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/bitllm-org/bitllm/internal/account"
@@ -49,7 +50,7 @@ func (n *Node) handleReceipt(s network.Stream) {
 
 // attributionLogMax is the size at which attribution.jsonl is rotated. One
 // older file is kept, so the two together stay under twice this.
-const attributionLogMax = 64 << 20
+var attributionLogMax int64 = 64 << 20
 
 // recordPeerBinding appends the link between a receipt's client pseudonym and
 // the node id that actually delivered it, when the operator asked for it with
@@ -86,7 +87,9 @@ func (n *Node) recordPeerBinding(sr receipts.SignedReceipt, from peer.ID, addr s
 	n.attributionMu.Lock()
 	defer n.attributionMu.Unlock()
 	if info, err := os.Stat(path); err == nil && info.Size() >= attributionLogMax {
-		os.Rename(path, path+".1")
+		if err := os.Rename(path, path+".1"); err != nil {
+			log.Printf("attribution log: rotate: %v", err)
+		}
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -94,6 +97,13 @@ func (n *Node) recordPeerBinding(sr receipts.SignedReceipt, from peer.ID, addr s
 		return
 	}
 	defer f.Close()
+	// An older file may have been created with a wider mode; O_CREATE does
+	// not tighten an existing one.
+	if runtime.GOOS != "windows" {
+		if err := f.Chmod(0o600); err != nil {
+			log.Printf("attribution log: chmod: %v", err)
+		}
+	}
 	if _, err := f.Write(b); err != nil {
 		log.Printf("attribution log: %v", err)
 	}

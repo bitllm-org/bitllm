@@ -595,6 +595,14 @@ func (n *Node) handleInfer(s network.Stream) {
 		refuse(503, "this node is shutting down")
 		return
 	}
+	// A denied peer is refused before its body is read, so it cannot hold a
+	// reader slot or part of the byte budget while it waits. admit checks this
+	// again, for callers that do not come through here.
+	if n.cfg.Deny[remote] {
+		n.refused.deny.Add(1)
+		refuse(403, msgDenied)
+		return
+	}
 	if len(n.cfg.Allow) > 0 && !n.cfg.Allow[remote] {
 		n.refused.allow.Add(1)
 		refuse(403, notAllowedText(remote))

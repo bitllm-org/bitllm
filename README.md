@@ -458,7 +458,9 @@ bitllm --upstream http://localhost:8000/v1 --model ... \
   others for the model at once; if yours is the only one, they get that message right away, not
   after a wait.
 - Your model still appears in everyone's `/v1/models`, because the list is not announced.
-- Without `--allow` nothing changes: the three rules above apply.
+- To refuse one node while everyone else is served as before, use `--deny PEER_ID` (repeatable).
+  See [docs/abuse.md](docs/abuse.md).
+- Without `--allow` or `--deny` nothing changes: the three rules above apply.
 - The list is read at startup; restart the node to change it.
 
 ### Accounts
@@ -553,8 +555,9 @@ already streaming through your relay is cut when it goes down, and the user's ag
   If that matters where you live, use the network through a VPN or Tor-capable VPS.
 - If you share a model, the clients you serve can see your IP too.
 - **A host may keep a record of who it served.** With `--attribution-log` a server writes the node
-  id and address behind each job, and the token counts, to a local file. It does not write the
-  prompt or the answer. A host that investigates abuse may look at requests more closely, as any
+  id and address behind each receipt it countersigns, and the token counts, to a local file. It
+  does not write the prompt or the answer, and a job whose client does not send a receipt back
+  leaves no line. A host that investigates abuse may look at requests more closely, as any
   inference provider can.
 - **Don't use the network to attack systems you have no permission to test**, or to harm people.
   The models are open; the machines that run them belong to people who share them for free. A host

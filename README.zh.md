@@ -114,6 +114,8 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 - `--peer-fallback`：你自己的服务挂了时，用其他节点回答你分享的模型。那些节点能读到 prompt。
 - `--open-slots N`：配合 `--open`，没被邀请的节点最多同时占几个名额。默认是 `--concurrency` 的一半，至少 1 个。
 - `--open-daily N`：配合 `--open`，所有没被邀请的节点每个 UTC 日合计能用多少积分，用完后只能等空闲名额。默认 0，不限。
+- `--deny PEER_ID`：直接拒绝一个节点，在它拿到服务名额或用掉额度之前。可重复。要填节点 ID，不是收据里的假名。见 [docs/abuse.md](docs/abuse.md)。
+- `--attribution-log`：为你签发的每张收据记下背后的节点，写在数据目录的 `attribution.jsonl`：节点 ID、地址、收据假名和 token 数，永远不记 prompt。默认关。
 - `--audit-every N`：配合 `--audit`，给一个节点发多少个真实请求后抽查一次。默认 50。
 - `--audit-serve`：如果你的服务返回 prompt logprobs（vLLM），就替其他节点的 `--audit` 打分。
 - `--gateway ADDR`：网关地址。默认 `127.0.0.1:7778`。
@@ -301,7 +303,8 @@ bitllm --upstream http://localhost:8000/v1 --model ... \
 - 名单里的节点不管有没有被邀请，都按会员对待，任何空闲名额都能用；`--free-daily` 照样生效。
 - 其他节点一律拒绝，包括会员，错误是 `403 not allowed: this server serves only the peers its owner listed with --allow. Your node is 12D3KooW...; send that id to the owner to be added`。对方的网关会跳过你、同时去找别的服务方；如果只有你在分享这个模型，它会立刻收到这句话，不用等。
 - 你的模型仍然出现在所有人的 `/v1/models` 里，因为列表不是广播的。
-- 不加 `--allow` 一切照旧，按上面三条规则。
+- 只想拒绝某个节点、其他人照常服务，用 `--deny PEER_ID`（可重复）。见 [docs/abuse.md](docs/abuse.md)。
+- 不加 `--allow` 或 `--deny` 一切照旧，按上面三条规则。
 - 名单只在启动时读取；改了要重启节点。
 
 ### 账户
@@ -363,6 +366,8 @@ bitllm --public --port 4001 \
 - **帮你推理的节点能看到你的 prompt**，和任何推理服务商一样。传输是加密的（Noise/TLS/QUIC），但服务方机器要读明文才能推理。不要发敏感信息。
 - **和你直连的节点能看到你的 IP**，服务你的节点能看到你的节点 ID。在意的话，通过 VPN 或者能走 Tor 的 VPS 使用。
 - 你分享模型时，你服务的客户端也能看到你的 IP。
+- **服务方可能记录它服务过谁。** 加 `--attribution-log` 时，服务器会把每张它签发的收据背后的节点 ID、地址和 token 数写进本地文件，不写 prompt 和回答；客户端没有回传收据的任务不会留下记录。调查滥用时，服务方也可能更仔细地看请求，和任何推理服务商一样。
+- **不要用这个网络攻击你没有授权测试的系统**，也不要伤害别人。模型是开放的；跑模型的机器是别人免费分享的。服务方决定服务谁，也可以拒绝任何节点（`--deny`）。服务方发现滥用后怎么做，见 [docs/abuse.md](docs/abuse.md)。
 - **节点可能用别的模型冒充。** 启动时加 `--audit`（默认关）抽查回答你的节点：大约每 50 个请求给某个节点发一个探针，另一个节点（审计方）逐 token 打分；一直不合格的节点 24 小时内不再接这个模型的请求（`GET /audits` 看结果）。默认审计方是我们（维护者）跑的一个节点；`--auditor PEER_ID` 换掉它，`--auditor none` 关掉。这只是抽查，不是证明：
   - 能查出跑的是另一个模型，以及贪心请求下换成了 Q4 或更粗的量化。
   - 查不出能认出探针的节点（探针 prompt 在源码里公开）、只在采样请求上换量化、或者把官方权重换成 heretic 这种轻度微调。
