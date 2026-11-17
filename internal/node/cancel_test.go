@@ -178,3 +178,26 @@ func TestMeterTerminalEvents(t *testing.T) {
 		}
 	}
 }
+
+// An Anthropic upstream that serves a cache_control prompt reports input_tokens
+// 0 and puts the prompt in the cache fields (oMLX does). The prompt is still billed.
+func TestMeterAnthropicCachedPrompt(t *testing.T) {
+	var m meter
+	for _, l := range []string{
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4,"input_tokens":0,"cache_creation_input_tokens":2017,"cache_read_input_tokens":0}}`,
+		`data: {"type":"message_stop"}`,
+	} {
+		m.line([]byte(l + "\n"))
+	}
+	if p, c := m.tokens(); p != 2017 || c != 4 {
+		t.Fatalf("streamed tokens = %d, %d; want 2017, 4", p, c)
+	}
+
+	var b meter
+	b.body([]byte(`{"type":"message","content":[],"usage":{"input_tokens":5,"output_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":1900}}`))
+	if p, c := b.tokens(); p != 1905 || c != 8 {
+		t.Fatalf("body tokens = %d, %d; want 1905, 8", p, c)
+	}
+}

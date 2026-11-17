@@ -191,6 +191,11 @@ type usage struct {
 	Completion int64 `json:"completion_tokens"`
 	Input      int64 `json:"input_tokens"`
 	Output     int64 `json:"output_tokens"`
+	// Anthropic counts cached prompt tokens apart from input_tokens. A client
+	// that marks cache_control (Claude Code does) can see input_tokens 0 with the
+	// whole prompt here, so the prompt is the sum of the three.
+	CacheWrite int64 `json:"cache_creation_input_tokens"`
+	CacheRead  int64 `json:"cache_read_input_tokens"`
 }
 
 func (m *meter) usage(u *usage) {
@@ -202,8 +207,8 @@ func (m *meter) usage(u *usage) {
 	}
 	// Anthropic streams input tokens in message_start and the running output
 	// count in message_delta, so take each when present.
-	if u.Input > 0 {
-		m.prompt = u.Input
+	if in := u.Input + u.CacheWrite + u.CacheRead; in > 0 {
+		m.prompt = in
 	}
 	if u.Output > 0 {
 		m.completion = u.Output
