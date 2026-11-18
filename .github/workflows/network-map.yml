@@ -2,9 +2,10 @@
 # starts a client node, lets the live announces arrive, and writes the
 # aggregate to the KV key the landing Worker serves as /network.json.
 #
-# Ten minutes is 144 writes a day, well under the free tier's 1,000. Running
-# this from CI keeps the map fresh when the laptop that used to upload it is
-# asleep, and needs no inbound ports of its own.
+# The trigger is the landing Worker's one minute cron, which dispatches this
+# workflow once the snapshot is more than two minutes old, so a run lands about
+# every three minutes. GitHub's own schedule below has never fired in this
+# repository. That is about 480 writes a day, under the free tier's 1,000.
 name: network-map
 on:
   schedule:

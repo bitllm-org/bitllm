@@ -131,8 +131,10 @@ Later, none of it urgent:
   as [releasing.md](releasing.md) describes.
 - `landing-page` main deploys from CI on every push, and its `check` job is required
   to merge.
-- The landing Worker has the cron `*/5 * * * *` and writes one `cron` key to
-  KV per tick with its decision, which is how a silent scheduler shows up.
+- The landing Worker has the cron `*/1 * * * *`. It dispatches the map
+  workflow once the snapshot is more than two minutes old, and writes a
+  `cron` probe key every fifteen minutes, which is how a silent scheduler
+  shows up without spending the map's write budget.
 - `bitllm-org/bitllm` has repository variables `CLOUDFLARE_ACCOUNT_ID` and
   `NETWORK_KV_NAMESPACE`, and the secret `CLOUDFLARE_API_TOKEN` (currently
   the shared deploy token; Workers KV Storage:Edit is enough). The
@@ -319,10 +321,11 @@ the site shows an empty network instead of an old one.
 GitHub's own cron for a repository this young never fired: a minimal
 five-minute test workflow produced no `schedule` run in a quarter of an hour,
 and `network-map` produced none in ninety minutes. The landing Worker
-therefore carries the real trigger. Its `*/5 * * * *` cron reads the KV value
-and dispatches `network-map` when `updated` is more than fifteen minutes old
-(`src/index.js` in `landing-page`, PR #16). A working GitHub cron still wins,
-and a duplicate run is harmless because the workflow has a concurrency group.
+therefore carries the real trigger. Its `*/1 * * * *` cron reads the KV value
+and dispatches `network-map` when `updated` is more than two minutes old
+(`src/index.js` in `landing-page`, PRs #16, #25 and #26). A cache lock keeps a
+tick from queueing a run while the previous one is still joining. A run takes
+about a minute, so a snapshot lands every three minutes.
 
 Repository configuration in `bitllm-org/bitllm`:
 
@@ -467,9 +470,9 @@ be live before `boot` goes away.
   network, and do not remove `boot` from `DefaultBootstrap` before `_dnsaddr`
   answers from the new zone and a second seed is live.
 - Do not promote a release while `seed1`'s unit has no `--auto-update=false`.
-- Do not run two map uploaders against the same KV key for long. The workflow
-  and its cron already write about 400 keys a day; a second two-minute loop
-  adds 720 and the free tier stops at 1,000.
+- Do not run two map uploaders against the same KV key for long. The loop
+  already writes about 580 keys a day (480 snapshots and 96 probes); a second
+  two-minute loop adds 720 and the free tier stops at 1,000.
 - Do not stop the old `boot` tunnel until the new tunnel has the same
   hostname, the new zone is authoritative, and the release that drops `boot` is
   the release clients install.
