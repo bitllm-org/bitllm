@@ -25,6 +25,11 @@ const (
 	InferProto  = "/bitllm/infer/1.0.0"
 	InferProto2 = "/bitllm/infer/1.1.0"
 
+	// ACIProto fetches a TEE attestation report through a server whose model
+	// runs behind Attested Confidential Inference (--e2ee-only), so a client can
+	// seal its prompt to that TEE before sending it through the server.
+	ACIProto = "/bitllm/aci/1.0.0"
+
 	ClaimTopic   = "bitllm/claims/1"
 	MembersTopic = "bitllm/invites/1"
 	ReceiptTopic = "bitllm/receipts/1"

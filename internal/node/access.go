@@ -98,6 +98,7 @@ const (
 	msgNotAllowed = "not allowed: this server serves only the peers its owner listed with --allow"
 	msgDenied     = "not allowed: this server declines requests from this peer"
 	msgUninvited  = "busy: this server serves uninvited nodes only when it is idle. Ask a member for an invite (bitllm invite), then link this node to your account"
+	msgPoolSpent  = "this server's free capacity for today is used up. Try again after 00:00 UTC"
 	msgQuotaSpent = "daily free quota on this server used up (its owner set one). Another server may still answer; sharing a model removes the limit, or try again after 00:00 UTC"
 )
 
@@ -198,6 +199,17 @@ func (n *Node) admit(remote peer.ID, model string, now time.Time, wait time.Dura
 	// uninvited node on an open server shares one pool; anyone else pays
 	// against their account, or its node id when it has none.
 	t := ticket{peer: remote, open: open, limit: n.cfg.FreeDaily, poolLimit: n.cfg.OpenDaily, start: now}
+	if !member && n.seen != nil && n.seen.isNew(remote, now) {
+		// A node id costs nothing, so a new one gets less until it has been
+		// around a day.
+		t.limit = n.cfg.NewDaily
+	}
+	if !member && n.cfg.OpenDailyHard && !open {
+		// The pool is spent: on this server that means no more today, not
+		// "only when idle".
+		n.refused.quota.Add(1)
+		return 429, n.quotaMsg(msgPoolSpent), a
+	}
 	switch {
 	case class == classContributor:
 	case class == classOpen:
@@ -216,7 +228,7 @@ func (n *Node) admit(remote peer.ID, model string, now time.Time, wait time.Dura
 	reserved, ok := n.quota.Take(t.key, amount, t.limit, now)
 	if !ok {
 		n.refused.quota.Add(1)
-		return 429, msgQuotaSpent, a
+		return 429, n.quotaMsg(msgQuotaSpent), a
 	}
 	t.reserved = reserved
 	if open {
@@ -428,4 +440,12 @@ func (n *Node) membersList(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Jobs7d > out[j].Jobs7d })
 	json.NewEncoder(w).Encode(out)
+}
+
+// quotaMsg is a quota refusal with the owner's --quota-note, if any.
+func (n *Node) quotaMsg(msg string) string {
+	if n.cfg.QuotaNote == "" {
+		return msg
+	}
+	return msg + ". " + n.cfg.QuotaNote
 }

@@ -4,6 +4,7 @@ go 1.26.11
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
+	github.com/google/go-tdx-guest v0.3.1
 	github.com/ipfs/go-cid v0.6.2
 	github.com/libp2p/go-libp2p v0.51.0
 	github.com/libp2p/go-libp2p-kad-dht v0.43.0
@@ -31,6 +32,7 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
+	github.com/google/logger v1.1.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
