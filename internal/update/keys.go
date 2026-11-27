@@ -12,7 +12,8 @@ import (
 // a signature from any of them is enough. `go run ./scripts/sign
 // check-keys` runs before every tag and fails if this list has no usable key.
 var TrustedKeys = []string{
-	"YKS4w2KYPryPWZ33AmwYQx88FGXEcb8L0git04mjQqQ=",
+	"YKS4w2KYPryPWZ33AmwYQx88FGXEcb8L0git04mjQqQ=", // Homin, offline
+	"7osPEwyoNb3zZpLaUo2is05DDPeuYqyGnPZvwluMbB8=", // Jiajun
 }
 
 // requireSignature is whether a release has to be signed to be installed. Every
