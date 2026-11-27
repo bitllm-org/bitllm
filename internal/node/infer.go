@@ -141,6 +141,10 @@ type inferReq struct {
 	// the first byte of the answer. Clients that read the 202 lines but not this
 	// way keep one fixed deadline, and leave this out.
 	Progress bool `json:"progress,omitempty"`
+	// Headers carries the E2EE v2 request headers of a request sealed to the
+	// server's TEE (internal/aci). Only those names pass; servers that predate
+	// it ignore the field, and the TEE then refuses the sealed body.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type inferHdr struct {
@@ -370,12 +374,12 @@ func (n *Node) callUpstream(ctx context.Context, path string, raw []byte) (*http
 	if pe != nil {
 		return nil, false, pe
 	}
-	return n.sendUpstream(ctx, path, body)
+	return n.sendUpstream(ctx, path, body, nil)
 }
 
 // callUpstreamForPeer is callUpstream for a request a stranger wrote: it passes
 // the boundary in boundary_request.go on the way in and on the way out.
-func (n *Node) callUpstreamForPeer(ctx context.Context, path string, raw []byte, from peer.ID) (*http.Response, bool, *peerError) {
+func (n *Node) callUpstreamForPeer(ctx context.Context, path string, raw []byte, from peer.ID, sealed map[string]string) (*http.Response, bool, *peerError) {
 	body, pe := decodeRequest(raw)
 	if pe != nil {
 		return nil, false, pe
@@ -383,7 +387,12 @@ func (n *Node) callUpstreamForPeer(ctx context.Context, path string, raw []byte,
 	if pe := n.limitPeerRequest(path, body); pe != nil {
 		return nil, false, pe
 	}
-	resp, stream, err := n.sendUpstream(ctx, path, body)
+	if sealed != nil {
+		// The TEE's own gateway must refuse to route the prompt to a
+		// provider it cannot verify, rather than fall back to a plain one.
+		body["provider"] = map[string]any{"aci_verified": true}
+	}
+	resp, stream, err := n.sendUpstream(ctx, path, body, sealed)
 	if err != nil {
 		return nil, false, peerFacing(path, from, err.(*peerError))
 	}
@@ -399,11 +408,15 @@ func decodeRequest(raw []byte) (map[string]any, *peerError) {
 }
 
 // sendUpstream sends an OpenAI or Anthropic request for a public model name to our own server.
-func (n *Node) sendUpstream(ctx context.Context, path string, body map[string]any) (*http.Response, bool, error) {
+func (n *Node) sendUpstream(ctx context.Context, path string, body map[string]any, sealed map[string]string) (*http.Response, bool, error) {
 	model, _ := body["model"].(string)
 	up, ok := n.upstreamModel(model)
 	if !ok {
 		return nil, false, &peerError{404, fmt.Sprintf("model %q not served here", model)}
+	}
+	if sealed != nil && up != model {
+		// The model name is part of what each sealed field is bound to.
+		return nil, false, &peerError{500, fmt.Sprintf("this server renames %q, so sealed requests for it cannot open; its owner must share it under its own name", model)}
 	}
 	body["model"] = up
 	if defuses(path) {
@@ -424,7 +437,7 @@ func (n *Node) sendUpstream(ctx context.Context, path string, body map[string]an
 		so["include_usage"] = true
 		body["stream_options"] = so
 	}
-	resp, err := n.postUpstream(ctx, path, body)
+	resp, err := n.postUpstream(ctx, path, body, sealed)
 	// A server that takes fewer images than the request carries says how
 	// many it takes. Remember that and send the newest ones only, now and
 	// from then on, rather than refuse every later turn of the session.
@@ -432,7 +445,7 @@ func (n *Node) sendUpstream(ctx context.Context, path string, body map[string]an
 		if lim, ok := imageLimitFrom(pe.msg); ok && trimImages(body, lim) > 0 {
 			n.setImageLimit(up, lim)
 			log.Printf("%s takes at most %d image(s) per request; sending only the newest %d", model, lim, lim)
-			resp, err = n.postUpstream(ctx, path, body)
+			resp, err = n.postUpstream(ctx, path, body, sealed)
 		}
 	}
 	if err != nil {
@@ -443,7 +456,7 @@ func (n *Node) sendUpstream(ctx context.Context, path string, body map[string]an
 
 // postUpstream sends a request to our own server. Any answer but 200 comes
 // back as a *peerError carrying the server's status and message.
-func (n *Node) postUpstream(ctx context.Context, path string, body map[string]any) (*http.Response, error) {
+func (n *Node) postUpstream(ctx context.Context, path string, body map[string]any, sealed map[string]string) (*http.Response, error) {
 	b, _ := json.Marshal(body)
 	ctx, cancel := context.WithCancel(ctx)
 	req, _ := http.NewRequestWithContext(ctx, "POST", n.cfg.Upstream+path, bytes.NewReader(b))
@@ -452,6 +465,9 @@ func (n *Node) postUpstream(ctx context.Context, path string, body map[string]an
 		// Anthropic-style servers (NVIDIA Flare, Anthropic's own) refuse a
 		// /messages request without it; vLLM and SGLang ignore it.
 		req.Header.Set("anthropic-version", "2023-06-01")
+	}
+	for k, v := range sealed {
+		req.Header.Set(k, v)
 	}
 	n.upstreamAuth(req)
 	resp, err := n.http.Do(req)
@@ -637,6 +653,14 @@ func (n *Node) handleInfer(s network.Stream) {
 		return
 	}
 	defer s.Close()
+	sealed := sealedHeaders(req.Headers)
+	if n.cfg.E2EEOnly && (sealed == nil || req.Path != "/chat/completions") {
+		reply(403, msgSealedOnly)
+		return
+	}
+	if !n.cfg.E2EEOnly {
+		sealed = nil // our server does not open sealed requests; pass nothing on
+	}
 	go out.watch(ctx, n.timers.gonePoll)
 	// What the request may cost at most, reserved against the daily quota
 	// while it runs. clamp() in callUpstream applies the same bound.
@@ -737,7 +761,7 @@ func (n *Node) handleInfer(s network.Stream) {
 	if wait > 0 {
 		stopProgress = out.progress(n.timers.progress)
 	}
-	resp, stream, pe := n.callUpstreamForPeer(ctx, req.Path, req.Body, remote)
+	resp, stream, pe := n.callUpstreamForPeer(ctx, req.Path, req.Body, remote, sealed)
 	var answer io.Reader
 	if pe == nil {
 		defer resp.Body.Close()
@@ -794,9 +818,16 @@ func quotaCredits(m *meter, bodyLen int64, promptFloor bool) int64 {
 // answers at once, as before.
 func (n *Node) infer(ctx context.Context, p peer.ID, path string, body []byte, stream bool,
 	w http.ResponseWriter, wait time.Duration) (started bool, err error) {
+	return n.inferSealed(ctx, p, path, body, stream, w, wait, nil)
+}
+
+// inferSealed is infer for a body sealed to the server's TEE: sealed holds its
+// E2EE headers, which the server passes on to its upstream.
+func (n *Node) inferSealed(ctx context.Context, p peer.ID, path string, body []byte, stream bool,
+	w http.ResponseWriter, wait time.Duration, sealed map[string]string) (started bool, err error) {
 	n.addRelayPaths(p)
 	proto := p2pproto.ID(protocol.InferProto2)
-	req := inferReq{Job: rand.Text(), Path: path, Body: body}
+	req := inferReq{Job: rand.Text(), Path: path, Body: body, Headers: sealed}
 	if wait > 0 {
 		req.Wait, req.Progress = wait.Milliseconds(), true
 	}

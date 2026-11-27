@@ -296,6 +296,35 @@ func (n *Node) complete(path string) http.HandlerFunc {
 			gatewayErr(w, path, 503, "no peer serves model "+req.Model+"; see GET /v1/models")
 			return
 		}
+		// A model behind a TEE: seal the prompt to the TEE we verified, and
+		// open the answer here. Nothing goes out in the clear.
+		var sealed *openWriter
+		var sealHdr map[string]string
+		if sealedFor(req.Model) {
+			if path != "/chat/completions" {
+				gatewayErr(w, path, 400, req.Model+" is end-to-end encrypted, which covers OpenAI chat completions (/v1/chat/completions) only")
+				return
+			}
+			v, err := n.teeKeyFor(r.Context(), req.Model, cands)
+			if err != nil {
+				gatewayErr(w, path, 502, teeErr(err))
+				return
+			}
+			b, sess, err := sealRequest(v, req.Model, body)
+			if err != nil {
+				gatewayErr(w, path, 400, "could not encrypt this request: "+err.Error())
+				return
+			}
+			if len(b) > maxGatewayBody {
+				gatewayErr(w, path, 413, msgTooLarge)
+				return
+			}
+			body, sealHdr = b, sess.Headers()
+			sealed = &openWriter{ResponseWriter: w, sess: sess, stream: req.Stream}
+			// Tell the caller what it was sealed to, so anyone can see the
+			// answer came through a TEE this client checked itself.
+			w.Header().Set("X-BitLLM-TEE", teeSummary(v))
+		}
 		// Try the best few peers. A peer that has no free slot keeps the
 		// request in its own queue for as long as we allow, so this loop only
 		// spins when every peer refused at once.
@@ -320,10 +349,25 @@ func (n *Node) complete(path string) http.HandlerFunc {
 				if left := len(cands) - tried; left > 1 {
 					wait = min(remaining, peerWait)
 				}
-				started, err := n.infer(r.Context(), p, path, body, req.Stream, w, wait)
+				var out http.ResponseWriter = w
+				if sealed != nil {
+					out = sealed
+				}
+				started, err := n.inferSealed(r.Context(), p, path, body, req.Stream, out, wait, sealHdr)
+				if sealed != nil && sealed.err != nil {
+					// The answer did not open: it did not come from the TEE we
+					// sealed the request to.
+					log.Printf("peer %s: sealed answer: %v", p, sealed.err)
+					n.peerMem.failed(p, req.Model, time.Now())
+					if started {
+						panic(http.ErrAbortHandler)
+					}
+					gatewayErr(w, path, 502, "the answer failed its end-to-end check: "+sealed.err.Error())
+					return
+				}
 				if err == nil {
 					n.peerMem.answered(p, req.Model, time.Now())
-					if n.audits != nil {
+					if n.audits != nil && sealed == nil {
 						n.audits.observe(p, req.Model, body)
 					}
 					return
@@ -457,6 +501,9 @@ func (n *Node) status(w http.ResponseWriter, r *http.Request) {
 	}
 	if n.limits != nil {
 		out["limits"] = n.limits
+	}
+	if tee := n.teeStatus(); len(tee) > 0 {
+		out["tee"] = tee
 	}
 	if e := n.announceErr.Load(); e != nil && *e != "" {
 		out["announce_error"] = *e

@@ -86,6 +86,10 @@ type Config struct {
 	RelayBehindProxy bool                   // peers reach our relay through a tunnel, all from one IP
 	Announce         []string               // extra public addrs, e.g. /dns4/boot.example.com/tcp/443/wss behind a tunnel
 	FreeDaily        int64                  // credits a member may use per UTC day on this server; contributors are unlimited
+	NewDaily         int64                  // with --open: credits a node first seen here less than a day ago may use per UTC day (0: FreeDaily)
+	QuotaNote        string                 // appended to the quota refusal, e.g. where to buy more
+	OpenDailyHard    bool                   // with --open: once --open-daily is spent, refuse uninvited nodes rather than serve them when idle
+	E2EEOnly         bool                   // serve only requests sealed to the upstream's TEE (ACI E2EE v2), and serve its attestation
 	Roots            []string               // accounts at the top of the invite tree; none = membership off
 	Open             bool                   // serve uninvited nodes like members (any free slot, quota per node)
 	Allow            map[peer.ID]bool       // if set, serve only these peers (like members), and refuse every other peer
@@ -125,6 +129,10 @@ type peerInfo struct {
 // Node is a running node. Call New, then Gateway for the local API.
 type Node struct {
 	cfg          Config
+	aciMu        sync.Mutex
+	aciLast      time.Time         // next attestation fetch a peer may start (handleACI)
+	teeKeys      map[string]teeKey // verified TEE keys by model (gateway)
+	seen         *firstSeen        // when each node first asked us for work (--new-daily)
 	host         host.Host
 	dht          *dht.IpfsDHT
 	topic        *pubsub.Topic
@@ -429,6 +437,10 @@ func New(ctx context.Context, cfg Config) (*Node, error) {
 	}
 	n.claims = account.OpenClaims(filepath.Join(cfg.DataDir, "claims.json"))
 	n.quota = quota.Open(filepath.Join(cfg.DataDir, "quota.json"))
+	if cfg.NewDaily > 0 {
+		n.seen = openFirstSeen(filepath.Join(cfg.DataDir, "seen.json"))
+		n.closers = append(n.closers, func() { n.seen.Close() })
+	}
 	if n.receipts, err = receipts.Open(filepath.Join(cfg.DataDir, "receipts.jsonl"), key, n.host.ID(), n.receiptSeed); err != nil {
 		return nil, err
 	}
@@ -515,6 +527,9 @@ func New(ctx context.Context, cfg Config) (*Node, error) {
 	if cfg.Upstream != "" {
 		n.host.SetStreamHandler(protocol.InferProto, n.handleInfer)
 		n.host.SetStreamHandler(protocol.InferProto2, n.handleInfer)
+		if cfg.E2EEOnly {
+			n.host.SetStreamHandler(protocol.ACIProto, n.handleACI)
+		}
 	}
 
 	if err := n.dht.Bootstrap(ctx); err != nil {
