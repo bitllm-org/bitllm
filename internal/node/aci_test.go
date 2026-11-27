@@ -96,7 +96,7 @@ func TestSealedEndToEnd(t *testing.T) {
 		}
 		var k []byte
 		fmt.Sscanf(r.Key, "%x", &k)
-		return &aci.Verified{Key: k, NotAfter: time.Now().Add(time.Hour)}, nil
+		return &aci.Verified{Key: k, NotAfter: time.Now().Add(time.Hour), RepoCommit: "abc123"}, nil
 	}
 	t.Cleanup(func() { verifyReport = old })
 
@@ -122,6 +122,9 @@ func TestSealedEndToEnd(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("stream=%v: %d %s", stream, w.Code, w.Body)
 		}
+		if h := w.Header().Get("X-BitLLM-TEE"); !strings.HasPrefix(h, "verified;") || !strings.Contains(h, "build=abc123") {
+			t.Fatalf("stream=%v: X-BitLLM-TEE %q", stream, h)
+		}
 		out := w.Body.String()
 		if stream {
 			var text strings.Builder
@@ -140,6 +143,10 @@ func TestSealedEndToEnd(t *testing.T) {
 		if !strings.Contains(out, "you said: secret-sys | secret-question") {
 			t.Fatalf("stream=%v: answer %q", stream, w.Body)
 		}
+	}
+	// GET /status shows the TEE this client verified.
+	if tee, _ := client.teeStatus()[teeModel].(map[string]any); tee == nil || tee["build"] != "abc123" {
+		t.Fatalf("status tee: %v", client.teeStatus())
 	}
 	// What crossed the relaying server was sealed.
 	for _, b := range *seen {

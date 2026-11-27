@@ -321,6 +321,9 @@ func (n *Node) complete(path string) http.HandlerFunc {
 			}
 			body, sealHdr = b, sess.Headers()
 			sealed = &openWriter{ResponseWriter: w, sess: sess, stream: req.Stream}
+			// Tell the caller what it was sealed to, so anyone can see the
+			// answer came through a TEE this client checked itself.
+			w.Header().Set("X-BitLLM-TEE", teeSummary(v))
 		}
 		// Try the best few peers. A peer that has no free slot keeps the
 		// request in its own queue for as long as we allow, so this loop only
@@ -498,6 +501,9 @@ func (n *Node) status(w http.ResponseWriter, r *http.Request) {
 	}
 	if n.limits != nil {
 		out["limits"] = n.limits
+	}
+	if tee := n.teeStatus(); len(tee) > 0 {
+		out["tee"] = tee
 	}
 	if e := n.announceErr.Load(); e != nil && *e != "" {
 		out["announce_error"] = *e

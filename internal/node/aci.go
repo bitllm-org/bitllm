@@ -192,6 +192,32 @@ func (n *Node) teeKeyFor(ctx context.Context, model string, cands []peer.ID) (*a
 	return nil, last
 }
 
+// teeSummary is the X-BitLLM-TEE value for an answer sealed to v.
+func teeSummary(v *aci.Verified) string {
+	return fmt.Sprintf("verified; e2ee=v2; build=%s; compose=%s; keyset=%s; valid_until=%s",
+		v.RepoCommit, v.ComposeHash, v.Digest, v.NotAfter.UTC().Format(time.RFC3339))
+}
+
+// teeStatus lists, per end-to-end encrypted model, the TEE this client last
+// verified, for GET /status.
+func (n *Node) teeStatus() map[string]any {
+	n.aciMu.Lock()
+	defer n.aciMu.Unlock()
+	out := map[string]any{}
+	for model, k := range n.teeKeys {
+		out[model] = map[string]any{
+			"verified":    true,
+			"checked_at":  k.when.UTC().Format(time.RFC3339),
+			"build":       k.v.RepoCommit,
+			"compose":     k.v.ComposeHash,
+			"keyset":      k.v.Digest,
+			"valid_until": k.v.NotAfter.UTC().Format(time.RFC3339),
+			"e2ee":        "v2",
+		}
+	}
+	return out
+}
+
 // sealRequest seals a chat request body for model and returns it with the
 // session that opens the answer.
 func sealRequest(v *aci.Verified, model string, body []byte) ([]byte, *aci.Session, error) {
