@@ -199,8 +199,8 @@ another. The name must identify the weights, not the machine.
    slash and the case as published. Independent hosts that serve the same repo match without a
    central registry, and one can replace another when it goes down.
 2. **A fine-tune or quant uses the repo id of the actual weights**, if it has one; otherwise the
-   base model plus a suffix that says what changed. For example the Mac Studio GLM node shares
-   `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX`; a fine-tune with no repo of its own appends
+   base model plus a suffix that says what changed. For example the Mac Studio node shares
+   `Hygaard/Inkling-2-Small-oQe-3.07bpw-MLX`; a fine-tune with no repo of its own appends
    the suffix to the base id, such as `nvidia/GLM-5.3-Flash-NVFP4-heretic`.
 3. **A private or brand-new model can use any stable name.** Nothing has to be registered first:
    the node announces it, `GET /v1/models` lists it, and the dashboard lets a user pick it. Use
@@ -213,7 +213,7 @@ gate; any id is accepted.
 |---|---|
 | `deepseek-v4.1-flash-1017` | DeepSeek V4.1 Flash, 1017 release, official weights |
 | `deepseek-v4.1-flash-1017-heretic` | same, heretic (uncensored) fine-tune |
-| `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX` | GLM 5.3 Flash, NVIDIA FP4-Local quant, Piecrust abliterated (uncensored), MLX on Apple silicon |
+| `Hygaard/Inkling-2-Small-oQe-3.07bpw-MLX` | Inkling 2 Small (Thinking Machines Lab), Hygaard's oQe 3.07-bit MLX quant on Apple silicon; reasoning model, accepts images, 128K context |
 
 Same name must mean same weights. A Hub id is the simplest way to make that true across
 operators.
@@ -243,7 +243,7 @@ curl localhost:7778/v1/models
 curl localhost:7778/v1/chat/completions \
   -d '{"model":"deepseek-v4.1-flash-1017","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 curl localhost:7778/v1/chat/completions \
-  -d '{"model":"junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"Hygaard/Inkling-2-Small-oQe-3.07bpw-MLX","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 curl localhost:7778/status             # your peer id, connections, ledger
 curl localhost:7778/queue              # slots, running jobs and the wait list
 ```

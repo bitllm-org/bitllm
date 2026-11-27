@@ -129,7 +129,7 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 网络名字就是客户端请求里的 `model` 字符串。两台机器广播同一个字符串，对这个模型来说就可以互换：网关挑一台，它不答了再换另一台。所以名字要说明权重，而不是说明机器。
 
 1. **公开模型用 Hugging Face 的原 id。** `nvidia/GLM-5.3-Flash-NVFP4`，斜杠和大小写都照发布的样子。独立的主机只要跑同一个仓库就能对上，不需要中心登记；一台下线，另一台可以接过去。
-2. **微调或量化用实际权重的仓库 id**，有的话；没有就在基础模型后面加后缀说明改了什么。比如 Mac Studio 上的 GLM 节点分享的是 `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX`；没有自己仓库的微调，把后缀接在基础 id 后面，例如 `nvidia/GLM-5.3-Flash-NVFP4-heretic`。
+2. **微调或量化用实际权重的仓库 id**，有的话；没有就在基础模型后面加后缀说明改了什么。比如 Mac Studio 节点分享的是 `Hygaard/Inkling-2-Small-oQe-3.07bpw-MLX`；没有自己仓库的微调，把后缀接在基础 id 后面，例如 `nvidia/GLM-5.3-Flash-NVFP4-heretic`。
 3. **私有或全新的模型可以随便取一个稳定的名字。** 不需要先登记：节点会自动广播，`GET /v1/models` 会列出来，dashboard 里可以直接选。只有本地服务报告的 id 不是客户端该用的名字时，才需要 `--model`。
 
 下面的表是 beta 到目前为止给参考模型用的短名字，不是门槛；任何 id 都能用。
@@ -138,7 +138,7 @@ bitllm --upstream http://localhost:8000/v1 --concurrency 2
 |---|---|
 | `deepseek-v4.1-flash-1017` | DeepSeek V4.1 Flash，1017 版，官方权重 |
 | `deepseek-v4.1-flash-1017-heretic` | 同上，heretic（去审查）微调 |
-| `junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX` | GLM 5.3 Flash，NVIDIA FP4-Local 量化，Piecrust abliterated（去审查），Apple 芯片上用 MLX 跑 |
+| `Hygaard/Inkling-2-Small-oQe-3.07bpw-MLX` | Inkling 2 Small（Thinking Machines Lab），Hygaard 做的 oQe 3.07-bit MLX 量化，Apple 芯片上跑；推理模型，支持图片，128K 上下文 |
 
 同一个名字必须对应同一套权重。用 Hub id 是最简单的做法。
 
@@ -162,7 +162,7 @@ curl localhost:7778/v1/models
 curl localhost:7778/v1/chat/completions \
   -d '{"model":"deepseek-v4.1-flash-1017","stream":true,"messages":[{"role":"user","content":"你好"}]}'
 curl localhost:7778/v1/chat/completions \
-  -d '{"model":"junmo-k/GLM-5.3-Flash-FP4-Local-Piecrust-Abliterated-MLX","stream":true,"messages":[{"role":"user","content":"你好"}]}'
+  -d '{"model":"Hygaard/Inkling-2-Small-oQe-3.07bpw-MLX","stream":true,"messages":[{"role":"user","content":"你好"}]}'
 curl localhost:7778/status             # 节点 ID、连接、账本
 curl localhost:7778/queue              # 名额、正在跑的活和等待队列
 ```
