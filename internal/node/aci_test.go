@@ -96,7 +96,7 @@ func TestSealedEndToEnd(t *testing.T) {
 		}
 		var k []byte
 		fmt.Sscanf(r.Key, "%x", &k)
-		return &aci.Verified{Key: k, NotAfter: time.Now().Add(time.Hour), RepoCommit: "abc123"}, nil
+		return &aci.Verified{Key: k, NotAfter: time.Now().Add(time.Hour), RepoCommit: "abc123", TCB: "up-to-date"}, nil
 	}
 	t.Cleanup(func() { verifyReport = old })
 
@@ -122,7 +122,7 @@ func TestSealedEndToEnd(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("stream=%v: %d %s", stream, w.Code, w.Body)
 		}
-		if h := w.Header().Get("X-BitLLM-TEE"); !strings.HasPrefix(h, "verified;") || !strings.Contains(h, "build=abc123") {
+		if h := w.Header().Get("X-BitLLM-TEE"); !strings.HasPrefix(h, "verified;") || !strings.Contains(h, "build=abc123") || !strings.Contains(h, "tcb=up-to-date") {
 			t.Fatalf("stream=%v: X-BitLLM-TEE %q", stream, h)
 		}
 		out := w.Body.String()

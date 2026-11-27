@@ -122,17 +122,21 @@ func TestListModelsCanonical(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	n := testNode(t, ctx, Config{})
-	n.remember(randomPeer(t), protocol.Announce{Models: []string{"deepseek-v4.1-flash-1017", "my-lab/private", "bad name"}, Max: 1})
+	n.remember(randomPeer(t), protocol.Announce{Models: []string{"deepseek-v4.1-flash-1017", "my-lab/private", "bad name", "phala/deepseek-v4.1-flash-1017-uncensored"}, Max: 1})
 
 	got := map[string]map[string]any{}
 	for _, m := range modelList(t, n) {
 		got[m["id"].(string)] = m
 	}
-	if _, ok := got["bad name"]; ok || len(got) != 2 {
+	if _, ok := got["bad name"]; ok || len(got) != 3 {
 		t.Fatalf("model list = %v", got)
 	}
 	if got["deepseek-v4.1-flash-1017"]["canonical"] != true || got["my-lab/private"]["canonical"] != false {
 		t.Fatalf("canonical flags wrong: %v", got)
+	}
+	// Only a model sealed to a verified TEE claims more than operator trust.
+	if got["phala/deepseek-v4.1-flash-1017-uncensored"]["privacy"] != "tee-e2ee" || got["my-lab/private"]["privacy"] != "operator-trusted" {
+		t.Fatalf("privacy tiers wrong: %v", got)
 	}
 	m := got["my-lab/private"]
 	if m["object"] != "model" || m["owned_by"] != "bitllm" || m["nodes"] != float64(1) {

@@ -223,7 +223,7 @@ func (n *Node) listModels(w http.ResponseWriter, r *http.Request) {
 	data := []map[string]any{}
 	for _, m := range names {
 		_, canonical := models.Manifest[m]
-		data = append(data, map[string]any{"id": m, "object": "model", "owned_by": "bitllm", "nodes": nodes[m], "canonical": canonical})
+		data = append(data, map[string]any{"id": m, "object": "model", "owned_by": "bitllm", "nodes": nodes[m], "canonical": canonical, "privacy": privacyOf(m)})
 	}
 	json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
 }

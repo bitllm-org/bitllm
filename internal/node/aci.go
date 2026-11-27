@@ -148,7 +148,15 @@ func (n *Node) attest(ctx context.Context, p peer.ID, model string) (*aci.Verifi
 
 // verifyReport checks a report; tests swap it, having no TDX hardware.
 var verifyReport = func(raw []byte, nonce string) (*aci.Verified, error) {
-	return aci.Verify(raw, nonce, time.Now(), aci.DefaultPolicy)
+	now := time.Now()
+	v, err := aci.Verify(raw, nonce, now, aci.DefaultPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if v.TCB, err = aci.CheckTCB(raw, now, nil); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // teeRecheck is how long a verified TEE key is used before a fresh report.
@@ -186,7 +194,7 @@ func (n *Node) teeKeyFor(ctx context.Context, model string, cands []peer.ID) (*a
 		}
 		n.teeKeys[model] = teeKey{v, now}
 		n.aciMu.Unlock()
-		log.Printf("verified the TEE behind %s: build %s, keyset %.24s…, valid until %s", model, v.RepoCommit, v.Digest, v.NotAfter.Format(time.DateOnly))
+		log.Printf("verified the TEE behind %s: build %s, keyset %.24s…, Intel TCB %s, valid until %s", model, v.RepoCommit, v.Digest, tcbOr(v.TCB), v.NotAfter.Format(time.DateOnly))
 		return v, nil
 	}
 	return nil, last
@@ -194,8 +202,15 @@ func (n *Node) teeKeyFor(ctx context.Context, model string, cands []peer.ID) (*a
 
 // teeSummary is the X-BitLLM-TEE value for an answer sealed to v.
 func teeSummary(v *aci.Verified) string {
-	return fmt.Sprintf("verified; e2ee=v2; build=%s; compose=%s; keyset=%s; valid_until=%s",
-		v.RepoCommit, v.ComposeHash, v.Digest, v.NotAfter.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("verified; e2ee=v2; tcb=%s; build=%s; compose=%s; keyset=%s; valid_until=%s",
+		tcbOr(v.TCB), v.RepoCommit, v.ComposeHash, v.Digest, v.NotAfter.UTC().Format(time.RFC3339))
+}
+
+func tcbOr(s string) string {
+	if s == "" {
+		return aci.TCBUnchecked
+	}
+	return s
 }
 
 // teeStatus lists, per end-to-end encrypted model, the TEE this client last
@@ -213,6 +228,7 @@ func (n *Node) teeStatus() map[string]any {
 			"keyset":      k.v.Digest,
 			"valid_until": k.v.NotAfter.UTC().Format(time.RFC3339),
 			"e2ee":        "v2",
+			"tcb":         tcbOr(k.v.TCB),
 		}
 	}
 	return out
@@ -296,6 +312,24 @@ func (o *openWriter) Flush() {
 
 // sealedFor reports whether requests for model must be sealed to a TEE.
 func sealedFor(model string) bool { return teeModels[model] }
+
+// What GET /v1/models says about who can read a model's requests, so nobody
+// mistakes one kind for the other.
+const (
+	// The gateway seals every request to a TEE it verified; no relay or
+	// operator can read it.
+	privacyTEE = "tee-e2ee"
+	// The node that serves the model reads the request, like any API
+	// provider: you trust its operator.
+	privacyOperator = "operator-trusted"
+)
+
+func privacyOf(model string) string {
+	if sealedFor(model) {
+		return privacyTEE
+	}
+	return privacyOperator
+}
 
 // teeModels are served behind Attested Confidential Inference: the gateway
 // seals every request for them and refuses to send one in the clear.

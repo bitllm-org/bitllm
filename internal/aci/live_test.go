@@ -35,6 +35,10 @@ func liveVerify(t *testing.T) *Verified {
 		t.Fatal(err)
 	}
 	t.Logf("verified: commit %s compose %s keyset %s until %s", v.RepoCommit, v.ComposeHash, v.Digest, v.NotAfter)
+	st, err := CheckTCB(raw, time.Now(), nil)
+	if err != nil || st != TCBUpToDate {
+		t.Fatalf("TCB: %q, %v", st, err)
+	}
 	return v
 }
 
