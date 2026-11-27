@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -162,5 +163,24 @@ func TestSealOpenRoundTrip(t *testing.T) {
 	out, err := s.OpenBody([]byte(ok))
 	if err != nil || !strings.Contains(string(out), `"content":"fine"`) || !strings.Contains(string(out), `"prompt_tokens":3`) {
 		t.Fatalf("body %s %v", out, err)
+	}
+}
+
+type downGetter struct{}
+
+func (downGetter) Get(string) (map[string][]string, []byte, error) {
+	return nil, nil, errors.New("no route to host")
+}
+
+// TestCheckTCBUnreachable: with Intel's PCS out of reach the check fails open
+// and says so, rather than taking the model down.
+func TestCheckTCBUnreachable(t *testing.T) {
+	raw, _, at := loadReport(t)
+	st, err := CheckTCB(raw, at, downGetter{})
+	if err != nil || st != TCBUnchecked {
+		t.Fatalf("got %q, %v", st, err)
+	}
+	if _, err := CheckTCB([]byte(`{}`), at, downGetter{}); err == nil {
+		t.Fatal("a report with no quote passed")
 	}
 }

@@ -59,6 +59,7 @@ type Verified struct {
 	Key         []byte    // X25519 E2EE public key of the workload
 	ComposeHash string    // measured sha256 of the app compose
 	RepoCommit  string    // source commit the service names
+	TCB         string    // TCBUpToDate or TCBUnchecked once CheckTCB ran, else empty
 }
 
 // Measurements are one accepted TEE build: the dstack OS image (MRTD, RTMR1,
