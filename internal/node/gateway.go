@@ -297,7 +297,8 @@ func (n *Node) complete(path string) http.HandlerFunc {
 			return
 		}
 		// A model behind a TEE: seal the prompt to the TEE we verified, and
-		// open the answer here. Nothing goes out in the clear.
+		// open the answer here. E2EE v2 seals message contents only: tool
+		// definitions and tool calls stay readable, and X-BitLLM-TEE says so.
 		var sealed *openWriter
 		var sealHdr map[string]string
 		if sealedFor(req.Model) {
@@ -323,7 +324,11 @@ func (n *Node) complete(path string) http.HandlerFunc {
 			sealed = &openWriter{ResponseWriter: w, sess: sess, stream: req.Stream}
 			// Tell the caller what it was sealed to, so anyone can see the
 			// answer came through a TEE this client checked itself.
-			w.Header().Set("X-BitLLM-TEE", teeSummary(v))
+			tee := teeSummary(v)
+			if sess.ToolsInClear() {
+				tee += "; tools=unsealed"
+			}
+			w.Header().Set("X-BitLLM-TEE", tee)
 		}
 		// Try the best few peers. A peer that has no free slot keeps the
 		// request in its own queue for as long as we allow, so this loop only

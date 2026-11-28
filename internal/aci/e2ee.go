@@ -31,6 +31,11 @@ type Session struct {
 	service *ecdh.PublicKey
 	client  *ecdh.PrivateKey
 	keyHex  string
+	// E2EE v2 seals message contents only. offersTools is whether the request
+	// gave the model tools: without them, a tool call in the answer did not
+	// come from the model. toolsInClear is whether anything about tools went
+	// out readable, definitions or earlier tool calls.
+	offersTools, toolsInClear bool
 }
 
 // NewSession starts a request for model, sealed to the workload key v proved.
@@ -132,17 +137,23 @@ func (s *Session) open(id, field, ct string) (string, error) {
 // SealChat encrypts every message content of a decoded chat completions
 // request in place (spec/e2ee-v2.md §5): a string content as itself, a
 // structured one as its compact JSON. Tool call arguments and tool
-// definitions are not covered by E2EE v2 and stay readable.
+// definitions are not covered by E2EE v2 and stay readable: ToolsInClear
+// says whether the request had any.
 func (s *Session) SealChat(body map[string]any) error {
 	if m, _ := body["model"].(string); m != s.model {
 		return errors.New("aci: request model differs from the session's")
 	}
+	s.offersTools = present(body["tools"]) || present(body["functions"])
+	s.toolsInClear = s.offersTools
 	msgs, _ := body["messages"].([]any)
 	sealed := 0
 	for i, m := range msgs {
 		msg, ok := m.(map[string]any)
 		if !ok {
 			continue
+		}
+		if present(msg["tool_calls"]) || present(msg["function_call"]) {
+			s.toolsInClear = true
 		}
 		var plain []byte
 		switch c := msg["content"].(type) {
@@ -172,6 +183,27 @@ func (s *Session) SealChat(body map[string]any) error {
 	return nil
 }
 
+// ToolsInClear reports whether the sealed request carried tool definitions or
+// earlier tool calls. E2EE v2 leaves those readable to the peer that passes
+// the request to the TEE, and the tool calls in the answer are not
+// authenticated.
+func (s *Session) ToolsInClear() bool { return s.toolsInClear }
+
+// present reports whether a decoded JSON value holds anything. Null, an empty
+// array and an empty object do not: servers send those when there is no tool
+// call.
+func present(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case []any:
+		return len(x) > 0
+	case map[string]any:
+		return len(x) > 0
+	}
+	return true
+}
+
 // choiceFields are the generated-content fields a v2 service seals.
 var choiceFields = map[string][]string{
 	"message": {"content", "reasoning", "reasoning_content"},
@@ -180,7 +212,9 @@ var choiceFields = map[string][]string{
 
 // OpenChat decrypts a chat completion, or one streamed chunk of it, in place.
 // Every non-empty content field must open: a plain one means the answer did
-// not come from the sealed path, and is refused.
+// not come from the sealed path, and is refused. So is a tool call when the
+// request offered no tools. E2EE v2 does not seal tool calls, so when it did
+// offer tools they pass unchecked.
 func (s *Session) OpenChat(doc map[string]any) error {
 	id, _ := doc["id"].(string)
 	choices, _ := doc["choices"].([]any)
@@ -201,6 +235,11 @@ func (s *Session) OpenChat(doc map[string]any) error {
 			obj, ok := ch[part].(map[string]any)
 			if !ok {
 				continue
+			}
+			if !s.offersTools && (present(obj["tool_calls"]) || present(obj["function_call"])) {
+				// The model had no tool to call, so this one was added on
+				// the way.
+				return fmt.Errorf("aci: choices.%d.%s has a tool call, but the request offered no tools", idx, part)
 			}
 			for _, f := range fields {
 				v, ok := obj[f].(string)
