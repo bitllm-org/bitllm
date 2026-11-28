@@ -81,8 +81,8 @@ type Policy struct {
 
 // Verify checks a report fetched with nonce against the TEE vendor root, the
 // event log, the policy, and the keyset binding (spec/aci.md §9.1, checks 1-4
-// and 6; key custody is not checked). It returns the X25519 E2EE key to seal
-// requests to.
+// and 6; key custody is not checked), and that the TD is not debuggable. It
+// returns the X25519 E2EE key to seal requests to.
 func Verify(raw []byte, nonce string, now time.Time, pol Policy) (*Verified, error) {
 	var r Report
 	if err := json.Unmarshal(raw, &r); err != nil {
@@ -133,7 +133,7 @@ func Verify(raw []byte, nonce string, now time.Time, pol Policy) (*Verified, err
 	}
 	opts := verify.DefaultOptions()
 	opts.Now = now
-	if err := verify.TdxQuote(q, opts); err != nil {
+	if err := verifyQuote(q, opts); err != nil {
 		return nil, fmt.Errorf("aci: quote does not verify: %w", err)
 	}
 	body := q.GetTdQuoteBody()
@@ -141,6 +141,9 @@ func Verify(raw []byte, nonce string, now time.Time, pol Policy) (*Verified, err
 	copy(want, rd[:])
 	if !bytes.Equal(body.GetReportData(), want) {
 		return nil, errors.New("aci: quote does not carry the report data")
+	}
+	if err := checkTDAttributes(body.GetTdAttributes()); err != nil {
+		return nil, err
 	}
 
 	// Measured workload: replay the event log into RTMR3 and read the
@@ -198,6 +201,28 @@ func Verify(raw []byte, nonce string, now time.Time, pol Policy) (*Verified, err
 			RepoCommit: r.Attestation.Source.RepoCommit}, nil
 	}
 	return nil, errors.New("aci: keyset has no X25519 E2EE key")
+}
+
+// verifyQuote checks a quote's signature chain to Intel's root. Tests stand in
+// for it: changing one bit of a real quote breaks Intel's signature over it.
+var verifyQuote = verify.TdxQuote
+
+// tdDebug is bit 0 of TD_ATTRIBUTES. In a debuggable TD the host can read and
+// change the TD's private memory and CPU state, so it can read the E2EE key
+// and every prompt sealed to it.
+const tdDebug = 1 << 0
+
+// checkTDAttributes refuses a debuggable TD. The same image measures the same
+// with debug on or off, so MRTD and the RTMRs the policy pins do not catch it,
+// and verifyQuote checks only the signatures.
+func checkTDAttributes(attrs []byte) error {
+	if len(attrs) != 8 {
+		return errors.New("aci: quote has no TD attributes")
+	}
+	if a := binary.LittleEndian.Uint64(attrs); a&tdDebug != 0 {
+		return fmt.Errorf("aci: the TD is debuggable (td_attributes %#x), so its host can read it", a)
+	}
+	return nil
 }
 
 func (p Policy) accepts(m Measurements) bool {

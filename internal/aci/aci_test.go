@@ -1,8 +1,10 @@
 package aci
 
 import (
+	"bytes"
 	"crypto/ecdh"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +13,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-tdx-guest/abi"
+	pb "github.com/google/go-tdx-guest/proto/tdx"
+	"github.com/google/go-tdx-guest/verify"
 )
 
 // The AAD bytes from spec/e2ee-v2-test-vectors.md.
@@ -85,6 +91,65 @@ func TestVerifyLiveReport(t *testing.T) {
 	bad, _ = json.Marshal(doc)
 	if _, err := Verify(bad, nonce, at, DefaultPolicy); err == nil || !strings.Contains(err.Error(), "compose") {
 		t.Fatalf("swapped compose: %v", err)
+	}
+}
+
+// withTDAttributes returns the recorded report with its quote's TD_ATTRIBUTES
+// set to a. That breaks Intel's signature over the quote, so a test that uses
+// it stands in for verifyQuote.
+func withTDAttributes(t *testing.T, raw []byte, a uint64) []byte {
+	t.Helper()
+	var r Report
+	if err := json.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	qb, err := hex.DecodeString(r.Attestation.Evidence.Quote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qa, err := abi.QuoteToProto(qb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := qa.(*pb.QuoteV4)
+	attrs := make([]byte, 8)
+	binary.LittleEndian.PutUint64(attrs, a)
+	q.GetTdQuoteBody().TdAttributes = attrs
+	nb, err := abi.QuoteToAbiBytes(q)
+	if err != nil || len(nb) != len(qb) {
+		t.Fatalf("re-encoding the quote: %d bytes, %v", len(nb), err)
+	}
+	return bytes.Replace(raw, []byte(r.Attestation.Evidence.Quote), []byte(hex.EncodeToString(nb)), 1)
+}
+
+// TestVerifyRefusesDebugTD: a debuggable TD running the accepted image
+// measures exactly like the real one, and its host can read the E2EE key.
+// Only TD_ATTRIBUTES tells them apart.
+func TestVerifyRefusesDebugTD(t *testing.T) {
+	raw, nonce, at := loadReport(t)
+	const live = 1 << 28 // SEPT_VE_DISABLE alone, as the recorded TD runs
+	if !bytes.Equal(withTDAttributes(t, raw, live), raw) {
+		t.Fatal("the recorded TD's attributes are not SEPT_VE_DISABLE alone")
+	}
+	old := verifyQuote
+	verifyQuote = func(any, *verify.Options) error { return nil }
+	t.Cleanup(func() { verifyQuote = old })
+
+	for _, c := range []struct {
+		attrs uint64
+		ok    bool
+	}{
+		{live, true},
+		{live | 1<<30, true}, // PKS is not a debug flag
+		{live | tdDebug, false},
+	} {
+		_, err := Verify(withTDAttributes(t, raw, c.attrs), nonce, at, DefaultPolicy)
+		if c.ok && err != nil {
+			t.Errorf("td_attributes %#x: %v", c.attrs, err)
+		}
+		if !c.ok && (err == nil || !strings.Contains(err.Error(), "debuggable")) {
+			t.Errorf("td_attributes %#x: got %v, want it refused as debuggable", c.attrs, err)
+		}
 	}
 }
 
