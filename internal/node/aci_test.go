@@ -47,6 +47,7 @@ func teeUpstream(t *testing.T) (*httptest.Server, *[]string) {
 				Messages []struct {
 					Content string `json:"content"`
 				} `json:"messages"`
+				Tools []any `json:"tools"`
 			}
 			json.Unmarshal(raw, &body)
 			h := map[string]string{}
@@ -69,8 +70,13 @@ func teeUpstream(t *testing.T) (*httptest.Server, *[]string) {
 			}
 			answer := "you said: " + strings.Join(said, " | ")
 			if !body.Stream {
-				fmt.Fprintf(w, `{"id":"r1","choices":[{"index":0,"message":{"role":"assistant","content":%q}}],"usage":{"prompt_tokens":5,"completion_tokens":3}}`,
-					sv.SealField(s, "r1", "choices.0.message.content", answer))
+				call := ""
+				if len(body.Tools) > 0 {
+					// E2EE v2 leaves tool calls readable, as a real gateway does.
+					call = `,"tool_calls":[{"id":"t1","type":"function","function":{"name":"lookup","arguments":"{}"}}]`
+				}
+				fmt.Fprintf(w, `{"id":"r1","choices":[{"index":0,"message":{"role":"assistant","content":%q%s}}],"usage":{"prompt_tokens":5,"completion_tokens":3}}`,
+					sv.SealField(s, "r1", "choices.0.message.content", answer), call)
 				return
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -122,7 +128,7 @@ func TestSealedEndToEnd(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatalf("stream=%v: %d %s", stream, w.Code, w.Body)
 		}
-		if h := w.Header().Get("X-BitLLM-TEE"); !strings.HasPrefix(h, "verified;") || !strings.Contains(h, "build=abc123") || !strings.Contains(h, "tcb=up-to-date") {
+		if h := w.Header().Get("X-BitLLM-TEE"); !strings.HasPrefix(h, "verified;") || !strings.Contains(h, "build=abc123") || !strings.Contains(h, "tcb=up-to-date") || strings.Contains(h, "tools=") {
 			t.Fatalf("stream=%v: X-BitLLM-TEE %q", stream, h)
 		}
 		out := w.Body.String()
@@ -170,6 +176,16 @@ func TestSealedEndToEnd(t *testing.T) {
 	}
 	if len(*seen) != 2 {
 		t.Fatal("a plain request reached the TEE upstream")
+	}
+
+	// Tool definitions and tool calls are not sealed (E2EE v2): the answer's
+	// tool call passes unchecked, and the header says tools went readable.
+	w := post(client, fmt.Sprintf(`{"model":%q,"tools":[{"type":"function","function":{"name":"lookup"}}],"messages":[{"role":"user","content":"find a.txt"}]}`, teeModel))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"lookup"`) {
+		t.Fatalf("tools offered: %d %s", w.Code, w.Body)
+	}
+	if h := w.Header().Get("X-BitLLM-TEE"); !strings.HasSuffix(h, "; tools=unsealed") {
+		t.Fatalf("tools offered: X-BitLLM-TEE %q", h)
 	}
 }
 

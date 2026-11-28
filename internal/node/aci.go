@@ -316,8 +316,9 @@ func sealedFor(model string) bool { return teeModels[model] }
 // What GET /v1/models says about who can read a model's requests, so nobody
 // mistakes one kind for the other.
 const (
-	// The gateway seals every request to a TEE it verified; no relay or
-	// operator can read it.
+	// The gateway seals every request's messages to a TEE it verified; no
+	// relay or operator can read them. Tool definitions and tool calls are
+	// not sealed (E2EE v2), which X-BitLLM-TEE flags as tools=unsealed.
 	privacyTEE = "tee-e2ee"
 	// The node that serves the model reads the request, like any API
 	// provider: you trust its operator.
